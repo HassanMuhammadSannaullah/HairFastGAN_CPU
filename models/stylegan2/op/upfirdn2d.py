@@ -8,8 +8,8 @@ from torch.utils.cpp_extension import load
 
 module_path = os.path.dirname(__file__)
 
-# Check if CUDA is available
-if torch.cuda.is_available():
+# Check if CUDA is available and CUDA_HOME is set
+if torch.cuda.is_available() and os.environ.get('CUDA_HOME'):
     upfirdn2d_op = load(
         "upfirdn2d",
         sources=[
