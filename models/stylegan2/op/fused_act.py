@@ -7,13 +7,18 @@ from torch.autograd import Function
 from torch.utils.cpp_extension import load
 
 module_path = os.path.dirname(__file__)
-fused = load(
-    "fused",
-    sources=[
-        os.path.join(module_path, "fused_bias_act.cpp"),
-        os.path.join(module_path, "fused_bias_act_kernel.cu"),
-    ],
-)
+
+# Check if CUDA is available
+if torch.cuda.is_available():
+    fused = load(
+        "fused",
+        sources=[
+            os.path.join(module_path, "fused_bias_act.cpp"),
+            os.path.join(module_path, "fused_bias_act_kernel.cu"),
+        ],
+    )
+else:
+    fused = None
 
 
 class FusedLeakyReLUFunctionBackward(Function):
@@ -23,11 +28,13 @@ class FusedLeakyReLUFunctionBackward(Function):
         ctx.negative_slope = negative_slope
         ctx.scale = scale
 
-        empty = grad_output.new_empty(0)
-
-        grad_input = fused.fused_bias_act(
-            grad_output, empty, out, 3, 1, negative_slope, scale
-        )
+        if fused is not None:
+            empty = grad_output.new_empty(0)
+            grad_input = fused.fused_bias_act(
+                grad_output, empty, out, 3, 1, negative_slope, scale
+            )
+        else:
+            grad_input = F.leaky_relu(grad_output, negative_slope) * scale
 
         dim = [0]
 
@@ -41,9 +48,12 @@ class FusedLeakyReLUFunctionBackward(Function):
     @staticmethod
     def backward(ctx, gradgrad_input, gradgrad_bias):
         (out,) = ctx.saved_tensors
-        gradgrad_out = fused.fused_bias_act(
-            gradgrad_input, gradgrad_bias, out, 3, 1, ctx.negative_slope, ctx.scale
-        )
+        if fused is not None:
+            gradgrad_out = fused.fused_bias_act(
+                gradgrad_input, gradgrad_bias, out, 3, 1, ctx.negative_slope, ctx.scale
+            )
+        else:
+            gradgrad_out = F.leaky_relu(gradgrad_input, ctx.negative_slope) * ctx.scale
 
         return gradgrad_out, None, None, None
 
@@ -51,8 +61,11 @@ class FusedLeakyReLUFunctionBackward(Function):
 class FusedLeakyReLUFunction(Function):
     @staticmethod
     def forward(ctx, input, bias, negative_slope, scale):
-        empty = input.new_empty(0)
-        out = fused.fused_bias_act(input, bias, empty, 3, 0, negative_slope, scale)
+        if fused is not None:
+            empty = input.new_empty(0)
+            out = fused.fused_bias_act(input, bias, empty, 3, 0, negative_slope, scale)
+        else:
+            out = F.leaky_relu(input + bias, negative_slope) * scale
         ctx.save_for_backward(out)
         ctx.negative_slope = negative_slope
         ctx.scale = scale
@@ -83,11 +96,11 @@ class FusedLeakyReLU(nn.Module):
 
 
 def fused_leaky_relu(input, bias, negative_slope=0.2, scale=2 ** 0.5):
-    if input.device.type == "cpu":
+    if input.device.type == "cpu" or fused is None:
         rest_dim = [1] * (input.ndim - bias.ndim - 1)
         return (
             F.leaky_relu(
-                input + bias.view(1, bias.shape[0], *rest_dim), negative_slope=0.2
+                input + bias.view(1, bias.shape[0], *rest_dim), negative_slope
             )
             * scale
         )
