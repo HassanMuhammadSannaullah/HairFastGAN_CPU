@@ -1,16 +1,18 @@
 import os
 import cv2
 import copy
-import dlib
 import math
 import argparse
 import numpy as np
 import gradio as gr
 from matplotlib import pyplot as plt
 import torch
+import face_recognition
+import face_alignment
 # private package
 from lib import utility
 
+fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, device='cpu')
 
 class GetCropMatrix():
     """
@@ -204,43 +206,33 @@ def draw_pts(img, pts, mode="pts", shift=4, color=(0, 255, 0), radius=1, thickne
 
 def process(input_image):
     image_draw = copy.deepcopy(input_image)
-    dets = detector(input_image, 1)
+    face_locations = face_recognition.face_locations(input_image)
 
-    num_faces = len(dets)
+    num_faces = len(face_locations)
     if num_faces == 0:
         print("Sorry, there were no faces found in '{}'".format(face_file_path))
         exit()
 
     results = []
-    for detection in dets:
-        face = sp(input_image, detection)
-        shape = []
-        for i in range(68):
-            x = face.part(i).x
-            y = face.part(i).y
-            shape.append((x, y))
-        shape = np.array(shape)
-        # image_draw = draw_pts(image_draw, shape)
-        x1, x2 = shape[:, 0].min(), shape[:, 0].max()
-        y1, y2 = shape[:, 1].min(), shape[:, 1].max()
-        scale = min(x2 - x1, y2 - y1) / 200 * 1.05
-        center_w = (x2 + x1) / 2
-        center_h = (y2 + y1) / 2
+    for face_location in face_locations:
+        top, right, bottom, left = face_location
+        face_landmarks = fa.get_landmarks_from_image(input_image, detected_faces=[face_location])
+        if face_landmarks is not None:
+            shape = np.array(face_landmarks[0])
+            x1, x2 = shape[:, 0].min(), shape[:, 0].max()
+            y1, y2 = shape[:, 1].min(), shape[:, 1].max()
+            scale = min(x2 - x1, y2 - y1) / 200 * 1.05
+            center_w = (x2 + x1) / 2
+            center_h = (y2 + y1) / 2
 
-        scale, center_w, center_h = float(scale), float(center_w), float(center_h)
-        landmarks_pv = alignment.analyze(input_image, scale, center_w, center_h)
-        results.append(landmarks_pv)
-        image_draw = draw_pts(image_draw, landmarks_pv)
+            scale, center_w, center_h = float(scale), float(center_w), float(center_h)
+            landmarks_pv = alignment.analyze(input_image, scale, center_w, center_h)
+            results.append(landmarks_pv)
+            image_draw = draw_pts(image_draw, landmarks_pv)
     return image_draw, results
 
 
 if __name__ == '__main__':
-    # face detector
-    # could be downloaded in this repo: https://github.com/italojs/facial-landmarks-recognition/tree/master
-    predictor_path = '/path/to/shape_predictor_68_face_landmarks.dat'
-    detector = dlib.get_frontal_face_detector()
-    sp = dlib.shape_predictor(predictor_path)
-
     # facial landmark detector
     args = argparse.Namespace()
     args.config_name = 'alignment'

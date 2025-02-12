@@ -4,7 +4,8 @@ import torch
 import numpy as np
 import sys
 import os
-import dlib
+import face_recognition
+import face_alignment
 
 sys.path.append(".")
 sys.path.append("..")
@@ -17,6 +18,7 @@ from utils.common import tensor2im
 from utils.alignment import align_face
 from PIL import Image
 
+fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, device='cpu')
 
 def main(args):
     net, opts = setup_model(args.ckpt, device)
@@ -109,14 +111,22 @@ def generate_inversions(args, g, latent_codes, is_cars):
 
 
 def run_alignment(image_path):
-    predictor = dlib.shape_predictor(paths_config.model_paths['shape_predictor'])
-    aligned_image = align_face(filepath=image_path, predictor=predictor)
-    print("Aligned image has shape: {}".format(aligned_image.size))
-    return aligned_image
+    img = face_recognition.load_image_file(image_path)
+    face_locations = face_recognition.face_locations(img)
+    if len(face_locations) == 0:
+        raise ValueError(f"No faces detected in the image {image_path}.")
+    print(f"Number of faces detected: {len(face_locations)}")
+    shapes = fa.get_landmarks_from_image(img, detected_faces=face_locations)
+    if shapes is not None:
+        aligned_image = align_face(filepath=image_path, landmarks=np.array(shapes[0]))
+        print("Aligned image has shape: {}".format(aligned_image.size))
+        return aligned_image
+    else:
+        raise ValueError(f"Could not find landmarks in the image {image_path}.")
 
 
 if __name__ == "__main__":
-    device = "cuda"
+    device = "cpu"
 
     parser = argparse.ArgumentParser(description="Inference")
     parser.add_argument("--images_dir", type=str, default=None,

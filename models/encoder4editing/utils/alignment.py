@@ -3,36 +3,33 @@ import PIL
 import PIL.Image
 import scipy
 import scipy.ndimage
-import dlib
+import face_recognition
+import face_alignment
 
+fa = face_alignment.FaceAlignment(face_alignment.LandmarksType._2D, device='cpu')
 
-def get_landmark(filepath, predictor):
-    """get landmark with dlib
+def get_landmark(filepath):
+    """get landmark with face_recognition and face_alignment
     :return: np.array shape=(68, 2)
     """
-    detector = dlib.get_frontal_face_detector()
-
-    img = dlib.load_rgb_image(filepath)
-    dets = detector(img, 1)
-
-    for k, d in enumerate(dets):
-        shape = predictor(img, d)
-
-    t = list(shape.parts())
-    a = []
-    for tt in t:
-        a.append([tt.x, tt.y])
-    lm = np.array(a)
-    return lm
+    img = face_recognition.load_image_file(filepath)
+    face_locations = face_recognition.face_locations(img)
+    if len(face_locations) == 0:
+        raise ValueError(f"No faces detected in the image {filepath}.")
+    shapes = fa.get_landmarks_from_image(img, detected_faces=face_locations)
+    if shapes is not None:
+        landmarks = np.array(shapes[0])
+        return landmarks
+    else:
+        raise ValueError(f"Could not find landmarks in the image {filepath}.")
 
 
-def align_face(filepath, predictor):
+def align_face(filepath):
     """
     :param filepath: str
     :return: PIL Image
     """
-
-    lm = get_landmark(filepath, predictor)
+    lm = get_landmark(filepath)
 
     lm_chin = lm[0: 17]  # left-right
     lm_eyebrow_left = lm[17: 22]  # left-right
